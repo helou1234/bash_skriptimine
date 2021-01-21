@@ -1,0 +1,64 @@
+Dokumentatsioon Powershelli haldusülesannete kohta
+
+
+Kasutajate ja gruppide haldus:
+
+Get-Command -Module Microsoft.PowerShell.LocalAccounts - kuvab listi käske, mida kasutada erinevate kasutajahaldusega seotud tegevusteks
+                                                         Nt: Add-localGroupMember lisab lokaalsesse gruppi uue kasutaja
+                                                         
+Get-localuser - kuvab kõik arvutis olevad aktiveeritud ja aktiveerimata kasutajad
+             -Name 'guest' | Select-Object * - kuvab kõik kasutajaga 'guest' seotud haldusinfo, nt mil salasõna aegub
+             -Name 'administrator' | Select-Object PasswordLastSet - kuvab millal kindel kasutaja viimati enda salasõna muutis
+             
+  $UserPassword = Read-Host –AsSecureString - annan käsu kuvada loodav salasõna salastatult
+  New-LocalUser "Kasutaja" -Password $Userpassword -FullName "Kasutaja" -Description "Kasutaja kirjeldus" - loon uue kasutaja
+  Set-LocalUser -Name Kasutaja -Password $UserPassword –Verbose - Vahetan kasutaja kontol salasõna
+  Set-LocalUser -Name Kasutaja –PasswordNeverExpires $False - sätestan, et kasutajal salasõna ei aegu
+  Remove-LocalUser -Name Kasutaja -Verbose - Kustutan kasutaja konto
+
+
+Get-LocalGroup - vaatan, millised kasutajate grupid on masinas olemas
+  New-LocalGroup Pythoni_Kasutajad -Description 'Pythonile ligipääsuga kasutajate grupp' - loon uue grupi
+  Add-LocalgroupMember -Group 'Administrators' -Member('Pythoni_Kasutajad') - Verbose - lisan kõik admini grupis olevad kasutajad ka pythoni kasutajate gruppid
+  Get-LocalGroupMember -Group 'Pythoni_Kasutajad' - kuvab kõik soovitud grupis olevad kasutajad.
+  Remove-LocalGroupMember -Group 'Pythoni_Kasutajad' –Member 'guest' - eemaldan kasutaja guest pythoni kasutajate kaustast
+
+  
+    foreach ($LocalGroup in Get-LocalGroup)
+    {
+    if (Get-LocalGroupMember $LocalGroup -Member 'Guest' –ErrorAction SilentlyContinue)
+    {
+    $LocalGroup.Name
+    }
+    }  ----- lasen arvutil kuvada kõik grupid, kuhu määratud kasutaja kuulub, nt 'guest' kuulub minu masinas vaid Guests gruppi.
+    
+    
+    $search = new-pssession -computer arvutite,nimed
+    invoke-command -scriptblock {Get-LocalGroupMember -Group 'Administrators'} -session $search -hidecomputername | select * -exclude RunspaceID | out-gridview -title "LocalAdmins"
+    ---- käsk, millega luban kasutajate ja gruppide haldust korraldada ka teisest arvutist, oluline on aga märkida arvutite reaalsed nimed
+
+
+Active Directory kasutajate haldus PowerShelli kaudu:
+
+Import-Module ActiveDirectory -- Selleks, et AD kasutajaid üldse PSi kaudu haldama hakata, pean esmalt aktiveerima AD mooduli
+
+Get-Command New-ADUser –Syntax --Vaatan, milliseid süntaktilisi elemente on võimalik käsuga New-ADUser kasutada
+
+New-ADUser M.Maasikas -- loon uue kasutaja
+    Get-ADUser -Filter * -Properties samAccountName | select samAccountName -- kuvab kõik AD kasutajad
+    
+    New-ADOrganizationalUnit -Name "Managers" -Path "DC=skriptid,DC=domeen" -- selleks, et oleks OU, kuhu kasutaja luua, loon ka uue OU
+    
+    New-ADUser -Name "Mari Maasikas" -GivenName "Mari" -Surname "Maasikas" -SamAccountName "M.Maasikas" -UserPrincipalName        "M.Maasikas@skriptid.domeen" -Path "OU=Managers,DC=skriptid,DC=domeen" -AccountPassword(Read-Host -AsSecureString "sisestage salasõna") -Enabled $true --- loon uue kasutaja tegelasele Mari Maasikas, kes kuulub OUsse managers
+    
+    Get-ADUser M.Maasikas -Properties CanonicalName, Enabled, GivenName, Surname, Name, UserPrincipalName, samAccountName, whenCreated, PasswordLastSet  | Select CanonicalName, Enabled, GivenName, Surname, Name, UserPrincipalName, samAccountName, whenCreated, PasswordLastSet --- kontrollin kas ja mis parameetritega sai Mari Maasika konto ADsse lisatud
+
+Skript, mida kasutades küsib skript kasutajalt loodavate kasutajate arvu ja nime:
+  $path="OU=IT,DC=skriptid,DC=domeen"
+  $username=Read-Host "Sisestage kasutajanimi"
+  $n=Read-Host "Sisestage loodavate kasutajate kogus"
+  $count=1..$n
+  foreach ($i in $count)
+  { New-AdUser -Name $username$i -Path $path -Enabled $True -ChangePasswordAtLogon $true -AccountPassword (ConvertTo-SecureString "Passw0rd!" -AsPlainText -force) -passThru }
+  
+  Nt tegin sellega 10 ITKasutajad kasutajat ja 2 ITKülalised kasutajat
