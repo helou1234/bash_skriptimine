@@ -1,6 +1,9 @@
 Dokumentatsioon Powershelli haldusülesannete kohta
 
 
+
+
+
 Kasutajate ja gruppide haldus:
 
 Get-Command -Module Microsoft.PowerShell.LocalAccounts - kuvab listi käske, mida kasutada erinevate kasutajahaldusega seotud tegevusteks
@@ -38,6 +41,11 @@ Get-LocalGroup - vaatan, millised kasutajate grupid on masinas olemas
     ---- käsk, millega luban kasutajate ja gruppide haldust korraldada ka teisest arvutist, oluline on aga märkida arvutite reaalsed nimed
 
 
+
+
+
+
+
 Active Directory kasutajate haldus PowerShelli kaudu:
 
 Import-Module ActiveDirectory -- Selleks, et AD kasutajaid üldse PSi kaudu haldama hakata, pean esmalt aktiveerima AD mooduli
@@ -62,3 +70,162 @@ Skript, mida kasutades küsib skript kasutajalt loodavate kasutajate arvu ja nim
   { New-AdUser -Name $username$i -Path $path -Enabled $True -ChangePasswordAtLogon $true -AccountPassword (ConvertTo-SecureString "Passw0rd!" -AsPlainText -force) -passThru }
   
   Nt tegin sellega 10 ITKasutajad kasutajat ja 2 ITKülalised kasutajat
+
+
+
+Skript, mis loeb varem loodud Microsoft Exceli .csv failist info ja seejärel loob kasutajad:
+
+$ADUsers = Import-csv C:\scripts\newusers.csv
+
+foreach ($User in $ADUsers) #####skripti osa, mis selgitab masinale, mida tähendavad Exceli faili erinevad read
+{
+
+       $Username    = $User.username
+       $Password    = $User.password
+       $Firstname   = $User.firstname
+       $Lastname    = $User.lastname
+    $Department = $User.department
+       $OU           = $User.ou
+
+       if (Get-ADUser -F {SamAccountName -eq $Username})  #### skripti osa, mis käseb eelnevalt kontrollida, kas sama nimega kasutaja on juba loodud
+       {
+               Write-Warning "Kasutaja nimega $Username on juba Active Directorys olemas."
+       }
+       else  ###Skripti osa, mis sätestab, kuidas kasutajat luua, kui seda veel ADs ei eksisteeri
+       {
+              New-ADUser `
+            -SamAccountName $Username `
+            -UserPrincipalName "$Username@domeeninimi.com" `
+            -Name "$Firstname $Lastname" `
+            -GivenName $Firstname `
+            -Surname $Lastname `
+            -Enabled $True `
+            -ChangePasswordAtLogon $True `
+            -DisplayName "$Lastname, $Firstname" `
+            -Department $Department `
+            -Path $OU `
+            -AccountPassword (convertto-securestring $Password -AsPlainText -Force)
+
+       }
+}
+
+NB!:nagu skriptis sätestatud, peab .cvd failis olema märgitud eesnimi, perenimi, kasutajanimi, grupp, esmane salasõna ja organisatsiooniline unit kõik eri veergudes
+
+
+
+
+
+
+
+Veebiserveri installeerimine ja haldus skriptidega:
+
+Veebiserveri installeerimiseks kasutatav käsk, kuhu lisatud ka erinevad vajalikud rollid:
+Install-WindowsFeature -Name Web-Mgmt-Tools,Web-App-Dev,Web-Security,Web-Performance, Web-Webserver,Web-Application-Proxy -IncludeAllSubFeature
+
+
+Veebilehe loomise skript PowerShell ISEs:
+    Import-Module WebAdministration ###Impordib veebihalduseks vajaliku mooduli
+    
+    ###Määrame veebilehe nime, nt:
+    $Poolinimi = “lehenimi”      
+    $versioon = “v4.0”
+    $Appinimi = “lehenimi”
+    $asukoht = “d:\veebileht”
+
+    cd IIS:\AppPools\ ###Liigub app poolside asukohta
+
+    if (!(Test-Path $Poolinimi -pathType container))  ###Skripti osa, mis kontrollib, kas app pool on loodud ja kui ei ole, siis loob selle järgmise parameetritega
+    {
+        $appPool = New-Item $PooliNimi
+        $appPool | Set-ItemProperty -Name “managedRuntimeVersion” -Value $versioon
+        $appPool | Set-ItemProperty -Name “enable32BitAppOnWin64” -Value “FALSE”           
+        $appPool | Set-ItemProperty -Name “processModel.loadUserProfile”
+      -Value “TRUE”
+        $group = [ADSI]”WinNT://ComputerName/
+    IIS_IUSRS,group”
+        $ntAccount = New-Object System.Security.Principal.
+    NTAccount(“IIS APPPOOL\$Poolinimi”)
+        $strSID = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier])
+        $user = [ADSI]”WinNT://$strSID”
+        $group.Add($user.Path)
+        Write-Host “$PooliNimi : Pool gruppi lisatud!.” -foregroundcolor “green”              
+    }
+
+    cd IIS:\Sites\   ###Liigume kohta, kuhu lehed salvestatakse
+    if (Test-Path $Appinimi -pathType container)    ###Skripti osa, mis kontrollib, kas tehtu on olemas ja kui ei ole, siis loob selle
+    {
+        return
+    }
+    $port = 443
+    $iisApp = New-Item $Appinimi -bindings @{protocol=”https”;
+    bindingInformation=”:443:”} -physicalPath $asukoht
+    Write-Output $iisApp
+
+    $iisApp | Set-ItemProperty -Name “applicationPool” -Value $Poolinimi 
+
+NB: Skript tuleks salvestada .ps1 lõpuga!
+
+
+
+
+Veebilehele sertifikaadi lisamise skript:
+
+$certPath = “F:\sertifikaadi\asukoht\arvutis.pfx” 
+$certPass = “sertifikaadi salasõna” 
+ 
+ 
+$pfx = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 
+$pfx.Import($certPath,$certPass,”Exportable,PersistKeySet”)  
+$store = New-Object System.Security.Cryptography.X509Certificates.X509Store(“My”,”LocalMachine”)  
+$store.Open(“ReadWrite”) 
+$store.Add($pfx)  
+$store.Close()  
+$certThumbprint = $pfx.Thumbprint 
+Write-host $certThumbprint
+$serviceAccount = ‘IIS_IUSRS,IUSR’
+$serviceAccounts = $serviceAccount.split(“,”);
+foreach($l in $serviceAccounts)
+{
+write-host $l
+$permissionType = ‘Read’
+    try
+    {
+        $cert = ”
+        $keyFullPath = ”
+        Write-Host “————————–“
+        Write-Host “Server: $env:ComputerName” -ForegroundColor Cyan
+        Write-Host “Sertifikaadi otsimine…” -ForegroundColor Green
+       
+        ###Skripti osa, mis proovib soovitud sertifikaati leida
+        $cert = Get-ChildItem -Path cert:\LocalMachine\My | Where-Object {$_.Thumbprint -eq ($certThumbprint -replace ‘\s’,”)}
+        If ($cert -ne $null -and $cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName -ne $null)
+        {
+            $keyPath = $env:ProgramData + “\Microsoft\Crypto\RSA\MachineKeys\”;
+            $keyName = $cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName;
+            $keyFullPath = $keyPath + $keyName;
+            Write-Host “Leitud sertifikaat…” -ForegroundColor Green
+            Write-Host “Õiguste andmine kasutajale $l…” -ForegroundColor Green
+            
+            ###Skripti osa, mis annab igale määratud kasutajale ligipääsu, loob ja salvestab sellekohase reegli
+            $acl = (Get-Item $keyFullPath).GetAccessControl(‘Access’) 
+            $buildAcl = New-Object  System.Security.AccessControl.FileSystemAccessRule($l,$permissionType,”Allow”)
+            $acl.SetAccessRule($buildAcl) 
+            Set-Acl $keyFullPath $acl 
+            Write-Host “Luba antud kasutajale: $l…” -ForegroundColor Green
+            Write-Host “————————–“
+        }
+        Else {
+            Write-Host “Soovitud sertifikaati jäljele $certThumbprint ei suudetud leida, või puudub selleks võti!” -ForegroundColor Red
+            Write-Host “————————–“
+        }
+    }
+    catch
+    {
+        Write-Host “$1 ei olnud võimalik avada!” -ForegroundColor Yellow
+        Write-Host “————————–“
+        throw $_;
+    }
+    } 
+    
+    
+  NB: skript tuleks taaskord salvestada .ps1 failina ning töötab loomaks erinevaid sertifitseeritud veebilehti
